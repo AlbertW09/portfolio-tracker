@@ -1,82 +1,38 @@
 import pandas as pd
 
 
-def clean_currency(val):
-  if pd.isna(val) or str(val).strip().lower() in ["n/a", "", "--"]:
-    return 0.0
-
-  val_str = (
-      str(val).replace("$", "").replace(",", "").replace("+", "").strip()
-  )
-
-  if val_str.endswith("%"):
-    try:
-      return float(val_str[:-1]) / 100.0
-    except ValueError:
-      return 0.0
-
-  try:
-    return float(val_str)
-  except ValueError:
-    return 0.0
+def clean_number(column):
+    text = column.astype(str).str.replace("[$,+%]", "", regex=True)
+    return pd.to_numeric(text, errors="coerce")
 
 
 def load_positions(path):
-  df = pd.read_csv(path, skipfooter=5, engine="python", on_bad_lines="skip")
-  df.columns = df.columns.str.strip()
-  df = df.loc[:, ~df.columns.duplicated()]
+    df = pd.read_csv(path, index_col=False, encoding="utf-8-sig")
 
-  symbol_col = df.columns[0]
-  df = df.dropna(subset=[symbol_col])
+    df.columns = df.columns.str.strip().str.lower()
 
-  col_mapping = {}
-  used_targets = set()
-  for col in df.columns:
-    c_lower = col.lower()
-    target = None
-    if "symbol" in c_lower and "symbol" not in used_targets:
-      target = "symbol"
-    elif "description" in c_lower and "description" not in used_targets:
-      target = "description"
-    elif "quantity" in c_lower and "quantity" not in used_targets:
-      target = "quantity"
-    elif "price" in c_lower and "last_price" not in used_targets:
-      target = "last_price"
-    elif "current value" in c_lower and "current_value" not in used_targets:
-      target = "current_value"
-    elif "cost basis" in c_lower and "cost_basis" not in used_targets:
-      target = "cost_basis"
+    df = df.rename(columns={
+        "account name": "account",
+        "symbol": "symbol",
+        "description": "description",
+        "quantity": "quantity",
+        "last price": "last_price",
+        "current value": "current_value",
+        "cost basis total": "cost_basis",
+    })
+    df = df[["account", "symbol", "description", "quantity",
+             "last_price", "current_value", "cost_basis"]].copy()
 
-    if target:
-      col_mapping[col] = target
-      used_targets.add(target)
+    df = df[df["symbol"].notna()]
 
-  df = df.rename(columns=col_mapping)
+    for col in ["quantity", "last_price", "current_value", "cost_basis"]:
+        df[col] = clean_number(df[col])
 
-  required_cols = [
-      "symbol",
-      "description",
-      "quantity",
-      "last_price",
-      "current_value",
-      "cost_basis",
-  ]
-  df = df[[c for c in required_cols if c in df.columns]]
+    is_cash = df["symbol"].str.endswith("**") | (df["symbol"] == "Pending Activity")
+    df.loc[is_cash, "symbol"] = df.loc[is_cash, "symbol"].str.replace("**", "")
+    df.loc[is_cash, "quantity"] = df.loc[is_cash, "current_value"]
+    df.loc[is_cash, "last_price"] = 1.0
+    df.loc[is_cash, "cost_basis"] = df.loc[is_cash, "current_value"]
+    df["is_cash"] = is_cash
 
-  numeric_cols = ["quantity", "last_price", "current_value", "cost_basis"]
-  for col in numeric_cols:
-    if col in df.columns:
-      df[col] = df[col].apply(clean_currency)
-
-  if "symbol" in df.columns and "current_value" in df.columns:
-    spaxx_mask = df["symbol"].str.contains("SPAXX", na=False)
-
-    df.loc[spaxx_mask & (df["quantity"] == 0.0), "quantity"] = df.loc[
-        spaxx_mask, "current_value"
-    ]
-    df.loc[spaxx_mask & (df["last_price"] == 0.0), "last_price"] = 1.0
-    df.loc[spaxx_mask & (df["cost_basis"] == 0.0), "cost_basis"] = df.loc[
-        spaxx_mask, "current_value"
-    ]
-
-  return df
+    return df.reset_index(drop=True)
