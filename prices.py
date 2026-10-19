@@ -6,6 +6,7 @@ def get_prices(symbols):
     tickers = [s.replace(".", "-") for s in symbols]
     data = yf.download(tickers, period="5d", progress=False, auto_adjust=False)
     latest = data["Close"].ffill().iloc[-1]
+    #print(data.head())
 
     prices = {}
     for symbol, ticker in zip(symbols, tickers):
