@@ -15,6 +15,13 @@ def get_prices(symbols):
     return prices
 
 
+def price_history(symbols, start):
+    tickers = [s.replace(".", "-") for s in symbols]
+    # auto_adjust=False because dividends are already counted as cash in the activity file
+    data = yf.download(tickers, start=start, progress=False, auto_adjust=False)
+    return data["Close"].rename(columns=dict(zip(tickers, symbols)))
+
+
 def add_live_values(df):
     df = df.copy()
     stock_symbols = df.loc[~df["is_cash"], "symbol"].unique().tolist()
