@@ -1,8 +1,10 @@
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-from compare import spy_value_today
+from compare import spy_history
+from history import add_today
 from parse import load_positions
 from prices import add_live_values
 
@@ -10,11 +12,12 @@ st.set_page_config(page_title="Portfolio Tracker", layout="wide")
 st.title("Portfolio Tracker")
 
 uploaded = st.file_uploader("Upload your Fidelity positions CSV", type="csv")
+history_file = st.sidebar.file_uploader("Your history file (optional)", type="csv")
 
 st.sidebar.subheader("Your deposits")
 text = st.sidebar.text_area(
     "Paste one deposit per line as date,amount",
-    placeholder="e.g.\n2026-06-07,67",
+    placeholder="2026-06-15,300\n2026-08-24,400",
     height=250,
 )
 
@@ -36,12 +39,20 @@ df = load_positions(uploaded)
 df = add_live_values(df)
 my_value = df["value"].sum()
 
+my_history = add_today(history_file, my_value)
+st.sidebar.download_button(
+    "Download updated history",
+    my_history.to_csv(index=False),
+    file_name="portfolio_history.csv",
+)
+
 if not deposits:
     st.metric("My portfolio", f"${my_value:,.2f}")
-    st.info("Add your deposits in the sidebar to compare against the S&P 500.")
+    st.error("Add your deposits in the sidebar to compare against the S&P 500.")
 else:
     put_in = sum(amount for date, amount in deposits)
-    spy_value = spy_value_today(deposits)
+    history = spy_history(deposits)
+    spy_value = history["spy_value"].iloc[-1]
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Money put in", f"${put_in:,.2f}")
@@ -52,6 +63,14 @@ else:
         st.success(f"You're beating the S&P 500 by ${my_value - spy_value:,.2f}")
     else:
         st.error(f"You're behind the S&P 500 by ${spy_value - my_value:,.2f}")
+
+    st.subheader("You vs. the S&P 500")
+    fig = go.Figure()
+    fig.add_scatter(x=history.index, y=history["spy_value"], name="If all in S&P 500")
+    fig.add_scatter(x=history.index, y=history["put_in"], name="Money put in", line_shape="hv", line_dash="dot")
+    fig.add_scatter(x=my_history["date"], y=my_history["value"], name="My portfolio", mode="lines+markers")
+    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified")
+    st.plotly_chart(fig)
 
 stocks = df[~df["is_cash"]].groupby("symbol")["value"].sum().sort_values(ascending=False)
 cash = df.loc[df["is_cash"], "value"].sum()
